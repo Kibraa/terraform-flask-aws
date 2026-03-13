@@ -2,8 +2,6 @@ import os
 
 
 class Config:
-    """Configuration de l'application Flask."""
-
     S3_BUCKET = os.environ.get("S3_BUCKET", "flask-app-static-files-2025")
     AWS_REGION = os.environ.get("AWS_REGION", "eu-west-3")
     DB_ENABLED = os.environ.get("DB_ENABLED", "true").lower() == "true"
@@ -20,4 +18,4 @@ class Config:
         SQLALCHEMY_DATABASE_URI = "sqlite:///local.db"
 
     SQLALCHEMY_TRACK_MODIFICATIONS = False
-    MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16 Mo max
+    MAX_CONTENT_LENGTH = 16 * 1024 * 1024

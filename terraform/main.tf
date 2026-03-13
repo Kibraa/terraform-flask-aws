@@ -1,20 +1,3 @@
-# ============================================================================
-# main.tf — Fichier principal : toutes les ressources à créer
-# ============================================================================
-# Ce fichier contient :
-#   1. Le réseau (VPC, Subnet, Internet Gateway, Security Groups)
-#   2. La machine virtuelle EC2
-#   3. Le bucket S3 (stockage cloud)
-#   4. La base de données RDS (optionnelle)
-#   5. Le rôle IAM pour que l'EC2 accède au S3
-# ============================================================================
-
-
-# ╔═══════════════════════════════════════════════════════════════════╗
-# ║  1. RÉSEAU — VPC, Subnet, Internet Gateway, Route Table         ║
-# ╚═══════════════════════════════════════════════════════════════════╝
-
-# --- VPC : le réseau virtuel privé qui isole nos ressources ---
 resource "aws_vpc" "main" {
   cidr_block           = "10.0.0.0/16"
   enable_dns_support   = true
@@ -25,7 +8,6 @@ resource "aws_vpc" "main" {
   }
 }
 
-# --- Subnet public : le sous-réseau où sera la VM ---
 resource "aws_subnet" "public" {
   vpc_id                  = aws_vpc.main.id
   cidr_block              = "10.0.1.0/24"
@@ -37,7 +19,6 @@ resource "aws_subnet" "public" {
   }
 }
 
-# --- Subnet privé #1 pour RDS (nécessite 2 AZ différentes) ---
 resource "aws_subnet" "private_a" {
   vpc_id            = aws_vpc.main.id
   cidr_block        = "10.0.2.0/24"
@@ -48,7 +29,6 @@ resource "aws_subnet" "private_a" {
   }
 }
 
-# --- Subnet privé #2 pour RDS ---
 resource "aws_subnet" "private_b" {
   vpc_id            = aws_vpc.main.id
   cidr_block        = "10.0.3.0/24"
@@ -59,7 +39,6 @@ resource "aws_subnet" "private_b" {
   }
 }
 
-# --- Internet Gateway : pour que la VM accède à Internet ---
 resource "aws_internet_gateway" "main" {
   vpc_id = aws_vpc.main.id
 
@@ -68,7 +47,6 @@ resource "aws_internet_gateway" "main" {
   }
 }
 
-# --- Route Table : diriger le trafic vers Internet ---
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.main.id
 
@@ -82,33 +60,24 @@ resource "aws_route_table" "public" {
   }
 }
 
-# --- Associer la route table au subnet public ---
 resource "aws_route_table_association" "public" {
   subnet_id      = aws_subnet.public.id
   route_table_id = aws_route_table.public.id
 }
 
-
-# ╔═══════════════════════════════════════════════════════════════════╗
-# ║  2. SECURITY GROUPS — Pare-feu pour la VM et la BDD             ║
-# ╚═══════════════════════════════════════════════════════════════════╝
-
-# --- Security Group pour l'EC2 ---
 resource "aws_security_group" "ec2_sg" {
   name        = "${var.project_name}-ec2-sg"
-  description = "Autoriser SSH (22), HTTP (80) et Flask (5000)"
+  description = "Allow SSH (22), HTTP (80) and Flask (5000)"
   vpc_id      = aws_vpc.main.id
 
-  # SSH — pour se connecter à la VM
   ingress {
     description = "SSH"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"] # En prod : restreindre à votre IP !
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # HTTP — pour accéder au site web
   ingress {
     description = "HTTP"
     from_port   = 80
@@ -117,7 +86,6 @@ resource "aws_security_group" "ec2_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # Flask — port par défaut de l'application
   ingress {
     description = "Flask App"
     from_port   = 5000
@@ -126,7 +94,6 @@ resource "aws_security_group" "ec2_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # Sortie — autoriser tout le trafic sortant
   egress {
     from_port   = 0
     to_port     = 0
@@ -139,7 +106,6 @@ resource "aws_security_group" "ec2_sg" {
   }
 }
 
-# --- Security Group pour RDS ---
 resource "aws_security_group" "rds_sg" {
   count = var.db_enabled ? 1 : 0
 
@@ -167,12 +133,6 @@ resource "aws_security_group" "rds_sg" {
   }
 }
 
-
-# ╔═══════════════════════════════════════════════════════════════════╗
-# ║  3. IAM — Rôle pour que l'EC2 accède au S3                      ║
-# ╚═══════════════════════════════════════════════════════════════════╝
-
-# --- Rôle IAM : identité que l'EC2 va "assumer" ---
 resource "aws_iam_role" "ec2_s3_role" {
   name = "${var.project_name}-ec2-s3-role"
 
@@ -190,7 +150,6 @@ resource "aws_iam_role" "ec2_s3_role" {
   })
 }
 
-# --- Politique IAM : quels droits sur S3 ---
 resource "aws_iam_role_policy" "s3_access" {
   name = "${var.project_name}-s3-access-policy"
   role = aws_iam_role.ec2_s3_role.id
@@ -215,21 +174,14 @@ resource "aws_iam_role_policy" "s3_access" {
   })
 }
 
-# --- Instance Profile : attacher le rôle à l'EC2 ---
 resource "aws_iam_instance_profile" "ec2_profile" {
   name = "${var.project_name}-ec2-profile"
   role = aws_iam_role.ec2_s3_role.name
 }
 
-
-# ╔═══════════════════════════════════════════════════════════════════╗
-# ║  4. EC2 — La Machine Virtuelle                                  ║
-# ╚═══════════════════════════════════════════════════════════════════╝
-
-# --- Récupérer la dernière AMI Ubuntu 22.04 ---
 data "aws_ami" "ubuntu" {
   most_recent = true
-  owners      = ["099720109477"] # Canonical (éditeur d'Ubuntu)
+  owners      = ["099720109477"]
 
   filter {
     name   = "name"
@@ -242,13 +194,11 @@ data "aws_ami" "ubuntu" {
   }
 }
 
-# --- Clé SSH ---
 resource "aws_key_pair" "deployer" {
   key_name   = var.key_pair_name
   public_key = file(var.ssh_public_key_path)
 }
 
-# --- L'instance EC2 elle-même ---
 resource "aws_instance" "flask_server" {
   ami                    = data.aws_ami.ubuntu.id
   instance_type          = var.instance_type
@@ -258,11 +208,10 @@ resource "aws_instance" "flask_server" {
   iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
 
   root_block_device {
-    volume_size = 20    # 20 Go de disque
-    volume_type = "gp3" # SSD rapide
+    volume_size = 20
+    volume_type = "gp3"
   }
 
-  # --- User Data : script exécuté au premier démarrage de la VM ---
   user_data = templatefile("${path.module}/userdata.sh.tpl", {
     s3_bucket_name = var.s3_bucket_name
     db_enabled     = var.db_enabled
@@ -277,29 +226,21 @@ resource "aws_instance" "flask_server" {
     Name = "${var.project_name}-server"
   }
 
-  # Attendre que la VM soit bien créée avant de continuer
   depends_on = [
     aws_internet_gateway.main,
     aws_s3_bucket.static_files
   ]
 }
 
-
-# ╔═══════════════════════════════════════════════════════════════════╗
-# ║  5. S3 — Stockage Cloud pour fichiers statiques                 ║
-# ╚═══════════════════════════════════════════════════════════════════╝
-
-# --- Le Bucket S3 ---
 resource "aws_s3_bucket" "static_files" {
   bucket        = var.s3_bucket_name
-  force_destroy = true # Permet de détruire le bucket même s'il contient des fichiers
+  force_destroy = true
 
   tags = {
     Name = "${var.project_name}-static-files"
   }
 }
 
-# --- Versionning : garder un historique des fichiers ---
 resource "aws_s3_bucket_versioning" "static_files" {
   bucket = aws_s3_bucket.static_files.id
 
@@ -308,7 +249,6 @@ resource "aws_s3_bucket_versioning" "static_files" {
   }
 }
 
-# --- Chiffrement : protéger les données au repos ---
 resource "aws_s3_bucket_server_side_encryption_configuration" "static_files" {
   bucket = aws_s3_bucket.static_files.id
 
@@ -319,7 +259,6 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "static_files" {
   }
 }
 
-# --- Bloquer l'accès public (sécurité) ---
 resource "aws_s3_bucket_public_access_block" "static_files" {
   bucket = aws_s3_bucket.static_files.id
 
@@ -329,7 +268,6 @@ resource "aws_s3_bucket_public_access_block" "static_files" {
   restrict_public_buckets = true
 }
 
-# --- Créer les "dossiers" dans S3 ---
 resource "aws_s3_object" "images_folder" {
   bucket  = aws_s3_bucket.static_files.id
   key     = "images/"
@@ -348,12 +286,6 @@ resource "aws_s3_object" "uploads_folder" {
   content = ""
 }
 
-
-# ╔═══════════════════════════════════════════════════════════════════╗
-# ║  6. RDS — Base de Données PostgreSQL (optionnel)                 ║
-# ╚═══════════════════════════════════════════════════════════════════╝
-
-# --- Groupe de subnets pour RDS ---
 resource "aws_db_subnet_group" "flask_db" {
   count = var.db_enabled ? 1 : 0
 
@@ -365,7 +297,6 @@ resource "aws_db_subnet_group" "flask_db" {
   }
 }
 
-# --- L'instance RDS ---
 resource "aws_db_instance" "flask_db" {
   count = var.db_enabled ? 1 : 0
 
@@ -386,7 +317,7 @@ resource "aws_db_instance" "flask_db" {
   db_subnet_group_name   = aws_db_subnet_group.flask_db[0].name
   vpc_security_group_ids = [aws_security_group.rds_sg[0].id]
 
-  skip_final_snapshot = true # Pour le dev — en prod, mettre false !
+  skip_final_snapshot = true
   multi_az            = false
 
   tags = {

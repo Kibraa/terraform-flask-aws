@@ -1,7 +1,3 @@
-"""
-Application Flask avec intégration S3 et CRUD complet.
-Déployée automatiquement sur EC2 via Terraform.
-"""
 import os
 import uuid
 from datetime import datetime
@@ -14,22 +10,15 @@ from flask_sqlalchemy import SQLAlchemy
 
 from config import Config
 
-# --- Initialisation ---
 app = Flask(__name__)
 app.config.from_object(Config)
 CORS(app)
 db = SQLAlchemy(app)
 
-# --- Client S3 ---
 s3_client = boto3.client("s3", region_name=Config.AWS_REGION)
 
 
-# =====================
-# MODÈLE DE DONNÉES
-# =====================
 class FileMetadata(db.Model):
-    """Stocke les métadonnées des fichiers uploadés dans S3."""
-
     __tablename__ = "file_metadata"
 
     id = db.Column(
@@ -60,14 +49,10 @@ class FileMetadata(db.Model):
         }
 
 
-# Créer les tables
 with app.app_context():
     db.create_all()
 
 
-# =====================
-# PAGE D'ACCUEIL
-# =====================
 HOME_HTML = """
 <!DOCTYPE html>
 <html lang="fr">
@@ -150,9 +135,6 @@ def health():
     return jsonify(status)
 
 
-# =====================
-# CRUD — FICHIERS
-# =====================
 @app.route("/api/files/upload", methods=["POST"])
 def upload_file():
     if "file" not in request.files:

@@ -1,13 +1,3 @@
-# ============================================================================
-# provider.tf — Configuration du provider AWS
-# ============================================================================
-# Ce fichier configure la connexion entre Terraform et AWS.
-# Terraform a besoin de savoir :
-#   - Quel provider utiliser (ici AWS)
-#   - Dans quelle région déployer les ressources
-#   - Comment s'authentifier (via les variables ou le fichier ~/.aws/credentials)
-# ============================================================================
-
 terraform {
   required_version = ">= 1.5.0"
 

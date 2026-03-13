@@ -1,15 +1,5 @@
-# ============================================================================
-# outputs.tf — Résultats affichés après le déploiement
-# ============================================================================
-# Après 'terraform apply', ces valeurs sont affichées dans le terminal.
-# Elles contiennent les informations essentielles pour accéder aux ressources.
-# ============================================================================
-
-# ---------------------
-# EC2 — Machine Virtuelle
-# ---------------------
 output "ec2_public_ip" {
-  description = "Adresse IP publique de la VM (pour accéder à l'application)"
+  description = "Adresse IP publique de la VM"
   value       = aws_instance.flask_server.public_ip
 }
 
@@ -33,9 +23,6 @@ output "ssh_command" {
   value       = "ssh -i ~/.ssh/id_rsa ubuntu@${aws_instance.flask_server.public_ip}"
 }
 
-# ---------------------
-# S3 — Stockage Cloud
-# ---------------------
 output "s3_bucket_name" {
   description = "Nom du bucket S3"
   value       = aws_s3_bucket.static_files.id
@@ -51,9 +38,6 @@ output "s3_bucket_region" {
   value       = aws_s3_bucket.static_files.region
 }
 
-# ---------------------
-# RDS — Base de Données (si activée)
-# ---------------------
 output "rds_endpoint" {
   description = "Endpoint de connexion à la base de données RDS"
   value       = var.db_enabled ? aws_db_instance.flask_db[0].endpoint : "Base de données non activée"
@@ -64,13 +48,10 @@ output "rds_hostname" {
   value       = var.db_enabled ? aws_db_instance.flask_db[0].address : "N/A"
 }
 
-# ---------------------
-# Résumé
-# ---------------------
 output "deployment_summary" {
   description = "Résumé complet du déploiement"
   value = <<-EOT
-    
+
     ╔══════════════════════════════════════════════════╗
     ║     DÉPLOIEMENT RÉUSSI !                        ║
     ╠══════════════════════════════════════════════════╣

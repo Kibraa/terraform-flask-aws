@@ -1,54 +1,31 @@
 #!/bin/bash
-# ============================================================================
-# userdata.sh.tpl — Script de provisioning automatique de la VM
-# ============================================================================
-# Ce script est exécuté automatiquement au PREMIER démarrage de l'EC2.
-# Il installe toutes les dépendances et lance l'application Flask.
-# Les variables $${...} sont remplacées par Terraform (templatefile).
-# ============================================================================
-
 set -e
 exec > /var/log/userdata.log 2>&1
 echo "========== DÉBUT DU PROVISIONING =========="
 echo "Date : $(date)"
 
-# ---------------------
-# 1. Mise à jour du système
-# ---------------------
 echo "[1/6] Mise à jour du système..."
 apt-get update -y
 apt-get upgrade -y
 
-# ---------------------
-# 2. Installation de Python et des outils
-# ---------------------
 echo "[2/6] Installation de Python et pip..."
 apt-get install -y python3 python3-pip python3-venv git curl unzip nginx
 
-# ---------------------
-# 3. Installation de l'AWS CLI
-# ---------------------
 echo "[3/6] Installation de AWS CLI..."
 curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
 unzip -q awscliv2.zip
 ./aws/install
 rm -rf aws awscliv2.zip
 
-# ---------------------
-# 4. Création de l'application Flask
-# ---------------------
 echo "[4/6] Configuration de l'application Flask..."
 mkdir -p /opt/flask-app
 cd /opt/flask-app
 
-# Créer l'environnement virtuel Python
 python3 -m venv venv
 source venv/bin/activate
 
-# Installer les dépendances Python
 pip install flask boto3 gunicorn psycopg2-binary flask-sqlalchemy flask-cors
 
-# Créer le fichier de configuration
 cat > /opt/flask-app/config.py << 'PYEOF'
 import os
 
@@ -56,7 +33,7 @@ class Config:
     S3_BUCKET = os.environ.get('S3_BUCKET', '${s3_bucket_name}')
     AWS_REGION = os.environ.get('AWS_REGION', '${aws_region}')
     DB_ENABLED = os.environ.get('DB_ENABLED', '${db_enabled}').lower() == 'true'
-    
+
     if DB_ENABLED:
         DB_HOST = os.environ.get('DB_HOST', '${db_host}')
         DB_NAME = os.environ.get('DB_NAME', '${db_name}')
@@ -65,16 +42,12 @@ class Config:
         SQLALCHEMY_DATABASE_URI = f"postgresql://{DB_USER}:{DB_PASS}@{DB_HOST}:5432/{DB_NAME}"
     else:
         SQLALCHEMY_DATABASE_URI = "sqlite:///local.db"
-    
+
     SQLALCHEMY_TRACK_MODIFICATIONS = False
-    MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16 Mo max upload
+    MAX_CONTENT_LENGTH = 16 * 1024 * 1024
 PYEOF
 
-# Créer l'application Flask principale
 cat > /opt/flask-app/app.py << 'PYEOF'
-"""
-Application Flask avec intégration S3 et CRUD complet.
-"""
 import os
 import uuid
 import json
@@ -86,28 +59,21 @@ import boto3
 from botocore.exceptions import ClientError
 from config import Config
 
-# --- Initialisation ---
 app = Flask(__name__)
 app.config.from_object(Config)
 CORS(app)
 db = SQLAlchemy(app)
-
-# --- Client S3 ---
 s3_client = boto3.client('s3', region_name=Config.AWS_REGION)
 
-# =====================
-# MODÈLES DE DONNÉES
-# =====================
 class FileMetadata(db.Model):
-    """Stocke les métadonnées des fichiers uploadés dans S3."""
     __tablename__ = 'file_metadata'
-    
+
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     filename = db.Column(db.String(255), nullable=False)
     s3_key = db.Column(db.String(500), nullable=False)
     file_type = db.Column(db.String(50))
     file_size = db.Column(db.Integer)
-    category = db.Column(db.String(50), default='uploads')  # images, logs, uploads
+    category = db.Column(db.String(50), default='uploads')
     description = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -125,13 +91,9 @@ class FileMetadata(db.Model):
             'updated_at': self.updated_at.isoformat()
         }
 
-# Créer les tables au démarrage
 with app.app_context():
     db.create_all()
 
-# =====================
-# PAGE D'ACCUEIL
-# =====================
 HOME_HTML = """
 <!DOCTYPE html>
 <html lang="fr">
@@ -165,7 +127,7 @@ HOME_HTML = """
         <h1>Flask Cloud App</h1>
         <p class="subtitle">Infrastructure déployée avec Terraform sur AWS</p>
         <p><span class="status">En ligne</span></p>
-        
+
         <div class="card" style="margin-top: 30px;">
             <h2>API Endpoints</h2>
             <div class="endpoint"><span class="method get">GET</span> /api/health</div>
@@ -197,62 +159,39 @@ def home():
         db_status='PostgreSQL (RDS)' if Config.DB_ENABLED else 'SQLite (local)'
     )
 
-# =====================
-# HEALTH CHECK
-# =====================
 @app.route('/api/health')
 def health():
-    """Vérifier que l'application et ses services fonctionnent."""
     status = {'app': 'ok', 'timestamp': datetime.utcnow().isoformat()}
-    
-    # Tester S3
     try:
         s3_client.head_bucket(Bucket=Config.S3_BUCKET)
         status['s3'] = 'ok'
     except Exception as e:
         status['s3'] = f'error: {str(e)}'
-    
-    # Tester la BDD
     try:
         db.session.execute(db.text('SELECT 1'))
         status['database'] = 'ok'
     except Exception as e:
         status['database'] = f'error: {str(e)}'
-    
     return jsonify(status)
 
-# =====================
-# CRUD — FICHIERS
-# =====================
-
-# --- CREATE : Uploader un fichier ---
 @app.route('/api/files/upload', methods=['POST'])
 def upload_file():
-    """Upload un fichier vers S3 et enregistre ses métadonnées."""
     if 'file' not in request.files:
         return jsonify({'error': 'Aucun fichier fourni'}), 400
-    
     file = request.files['file']
     if file.filename == '':
         return jsonify({'error': 'Nom de fichier vide'}), 400
-    
     category = request.form.get('category', 'uploads')
     description = request.form.get('description', '')
-    
-    # Générer un nom unique pour éviter les collisions
     file_id = str(uuid.uuid4())
     s3_key = f"{category}/{file_id}_{file.filename}"
-    
     try:
-        # Upload vers S3
         s3_client.upload_fileobj(
             file,
             Config.S3_BUCKET,
             s3_key,
             ExtraArgs={'ContentType': file.content_type}
         )
-        
-        # Sauvegarder les métadonnées en BDD
         metadata = FileMetadata(
             id=file_id,
             filename=file.filename,
@@ -264,53 +203,35 @@ def upload_file():
         )
         db.session.add(metadata)
         db.session.commit()
-        
-        return jsonify({
-            'message': 'Fichier uploadé avec succès',
-            'file': metadata.to_dict()
-        }), 201
-    
+        return jsonify({'message': 'Fichier uploadé avec succès', 'file': metadata.to_dict()}), 201
     except ClientError as e:
         return jsonify({'error': f'Erreur S3 : {str(e)}'}), 500
 
-# --- READ : Lister tous les fichiers ---
 @app.route('/api/files', methods=['GET'])
 def list_files():
-    """Lister tous les fichiers avec filtrage optionnel par catégorie."""
     category = request.args.get('category')
-    
     query = FileMetadata.query
     if category:
         query = query.filter_by(category=category)
-    
     files = query.order_by(FileMetadata.created_at.desc()).all()
-    return jsonify({
-        'count': len(files),
-        'files': [f.to_dict() for f in files]
-    })
+    return jsonify({'count': len(files), 'files': [f.to_dict() for f in files]})
 
-# --- READ : Récupérer un fichier par ID ---
 @app.route('/api/files/<file_id>', methods=['GET'])
 def get_file(file_id):
-    """Récupérer les métadonnées d'un fichier spécifique."""
     file = FileMetadata.query.get(file_id)
     if not file:
         return jsonify({'error': 'Fichier non trouvé'}), 404
     return jsonify(file.to_dict())
 
-# --- UPDATE : Modifier les métadonnées ---
 @app.route('/api/files/<file_id>', methods=['PUT'])
 def update_file(file_id):
-    """Mettre à jour la description ou la catégorie d'un fichier."""
     file = FileMetadata.query.get(file_id)
     if not file:
         return jsonify({'error': 'Fichier non trouvé'}), 404
-    
     data = request.get_json()
     if 'description' in data:
         file.description = data['description']
     if 'category' in data:
-        # Déplacer dans S3 si la catégorie change
         old_key = file.s3_key
         new_key = f"{data['category']}/{file.id}_{file.filename}"
         try:
@@ -324,51 +245,39 @@ def update_file(file_id):
             file.category = data['category']
         except ClientError as e:
             return jsonify({'error': f'Erreur S3 : {str(e)}'}), 500
-    
     db.session.commit()
     return jsonify({'message': 'Fichier mis à jour', 'file': file.to_dict()})
 
-# --- DELETE : Supprimer un fichier ---
 @app.route('/api/files/<file_id>', methods=['DELETE'])
 def delete_file(file_id):
-    """Supprimer un fichier de S3 et de la base de données."""
     file = FileMetadata.query.get(file_id)
     if not file:
         return jsonify({'error': 'Fichier non trouvé'}), 404
-    
     try:
         s3_client.delete_object(Bucket=Config.S3_BUCKET, Key=file.s3_key)
     except ClientError:
-        pass  # Le fichier n'existe peut-être plus dans S3
-    
+        pass
     db.session.delete(file)
     db.session.commit()
     return jsonify({'message': f'Fichier {file.filename} supprimé'})
 
-# --- DOWNLOAD : Générer une URL temporaire de téléchargement ---
 @app.route('/api/files/<file_id>/download', methods=['GET'])
 def download_file(file_id):
-    """Générer une URL pré-signée S3 pour télécharger le fichier."""
     file = FileMetadata.query.get(file_id)
     if not file:
         return jsonify({'error': 'Fichier non trouvé'}), 404
-    
     try:
         url = s3_client.generate_presigned_url(
             'get_object',
             Params={'Bucket': Config.S3_BUCKET, 'Key': file.s3_key},
-            ExpiresIn=3600  # URL valide 1 heure
+            ExpiresIn=3600
         )
         return jsonify({'download_url': url, 'expires_in': 3600})
     except ClientError as e:
         return jsonify({'error': f'Erreur : {str(e)}'}), 500
 
-# =====================
-# OPÉRATIONS S3 DIRECTES
-# =====================
 @app.route('/api/s3/list', methods=['GET'])
 def list_s3_objects():
-    """Lister directement les objets dans le bucket S3."""
     prefix = request.args.get('prefix', '')
     try:
         response = s3_client.list_objects_v2(
@@ -387,16 +296,10 @@ def list_s3_objects():
     except ClientError as e:
         return jsonify({'error': str(e)}), 500
 
-# =====================
-# LANCEMENT
-# =====================
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=False)
 PYEOF
 
-# ---------------------
-# 5. Créer le service systemd
-# ---------------------
 echo "[5/6] Configuration du service systemd..."
 cat > /etc/systemd/system/flask-app.service << 'SVCEOF'
 [Unit]
@@ -420,9 +323,6 @@ systemctl daemon-reload
 systemctl enable flask-app
 systemctl start flask-app
 
-# ---------------------
-# 6. Configurer Nginx comme reverse proxy
-# ---------------------
 echo "[6/6] Configuration de Nginx..."
 cat > /etc/nginx/sites-available/flask-app << 'NGEOF'
 server {

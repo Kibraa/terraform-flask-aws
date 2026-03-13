@@ -1,11 +1,10 @@
-# Terraform — fichiers sensibles et générés
+# Terraform — 
 terraform/.terraform/
 terraform/.terraform.lock.hcl
 terraform/terraform.tfvars
 terraform/*.tfstate
 terraform/*.tfstate.backup
 terraform/crash.log
-terraform/terraform.tfvars.example
 
 # Python
 __pycache__/
